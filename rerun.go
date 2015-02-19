@@ -117,7 +117,6 @@ func run(ch chan bool, bin string, args []string) {
 		for relaunch := range ch {
 			if proc != nil {
 				if err := proc.Signal(os.Interrupt); err != nil {
-					log("error on sending signal to process: '%s', will now hard-kill the process", err)
 					proc.Kill()
 				}
 				proc.Wait()
