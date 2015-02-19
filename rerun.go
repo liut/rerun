@@ -239,8 +239,11 @@ func rerun(buildpath string, args []string) (err error) {
 			gobuild(buildpath)
 		}
 
+		var errorOutput string
+		_, errorOutput, ierr := install(buildpath, errorOutput)
+
 		// rerun. if we're only testing, sending
-		if !(*never_run) {
+		if !(*never_run) && ierr == nil {
 			runch <- true
 		}
 	})
