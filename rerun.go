@@ -156,10 +156,10 @@ func refresh(buildpath string, ch chan bool) {
 		}
 	}
 
-	// if ok, _ := goinstall(buildpath); !ok {
-	//   ch <- false
-	//   return
-	// }
+	if ok, _ := goinstall(buildpath); !ok {
+		ch <- false
+		return
+	}
 
 	ch <- true
 	return
