@@ -13,17 +13,14 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"go/build"
 )
 
 var (
-	do_tests      = flag.Bool("test", false, "Run tests (before running program)")
-	do_build      = flag.Bool("build", false, "Build program")
-	never_run     = flag.Bool("no-run", false, "Do not run")
-	race_detector = flag.Bool("race", false, "Run program and tests with the race detector")
+	do_tests = flag.Bool("test", false, "Run tests (before running program)")
+	do_build = flag.Bool("build", false, "Build program")
 )
 
 func buildpathDir(buildpath string) (string, error) {
@@ -62,124 +59,113 @@ func log(format string, args ...interface{}) {
 	fmt.Printf("[rerun] %s", fmt.Sprintf(format+"\n", args...))
 }
 
-func install(buildpath, lastError string) (installed bool, errorOutput string, err error) {
-	cmdline := []string{"go", "get"}
+func gobuild(buildpath string) (bool, error) {
+	cmd := exec.Command("go", "build", "-v", buildpath)
 
-	if *race_detector {
-		cmdline = append(cmdline, "-race")
-	}
-	cmdline = append(cmdline, buildpath)
-
-	// setup the build command, use a shared buffer for both stdOut and stdErr
-	cmd := exec.Command("go", cmdline[1:]...)
 	buf := bytes.NewBuffer([]byte{})
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 
-	err = cmd.Run()
-
-	// when there is any output, the go command failed.
-	if buf.Len() > 0 {
-		errorOutput = buf.String()
-		if errorOutput != lastError {
-			fmt.Print(errorOutput)
-		}
-		err = errors.New("compile error")
-		return
-	}
-
-	// all seems fine
-	installed = true
-	return
-}
-
-func test(buildpath string) (passed bool, err error) {
-	cmdline := []string{"go", "test"}
-
-	if *race_detector {
-		cmdline = append(cmdline, "-race")
-	}
-	cmdline = append(cmdline, "-v", buildpath)
-
-	// setup the build command, use a shared buffer for both stdOut and stdErr
-	cmd := exec.Command("go", cmdline[1:]...)
-	buf := bytes.NewBuffer([]byte{})
-	cmd.Stdout = buf
-	cmd.Stderr = buf
-
-	err = cmd.Run()
-	passed = err == nil
-
-	if !passed {
-		fmt.Println(buf)
-	} else {
-		log("tests passed")
-	}
-
-	return
-}
-
-func gobuild(buildpath string) (passed bool, err error) {
-	cmdline := []string{"go", "build"}
-
-	if *race_detector {
-		cmdline = append(cmdline, "-race")
-	}
-	cmdline = append(cmdline, "-v", buildpath)
-
-	// setup the build command, use a shared buffer for both stdOut and stdErr
-	cmd := exec.Command("go", cmdline[1:]...)
-	buf := bytes.NewBuffer([]byte{})
-	cmd.Stdout = buf
-	cmd.Stderr = buf
-
-	err = cmd.Run()
-	passed = err == nil
-
-	if !passed {
+	if err := cmd.Run(); err != nil {
 		log("build failed")
-		fmt.Println(buf)
-	} else {
-		log("build successful")
+		fmt.Println(buf.String())
+		return false, err
 	}
 
-	return
+	log("build succeeded")
+	return true, nil
 }
 
-func run(binName, binPath string, args []string) (runch chan bool) {
-	runch = make(chan bool)
+func goinstall(buildpath string) (bool, error) {
+	cmd := exec.Command("go", "get", buildpath)
+
+	buf := bytes.NewBuffer([]byte{})
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+
+	if err := cmd.Run(); err != nil {
+		log("install failed")
+		fmt.Println(buf.String())
+		return false, err
+	}
+
+	log("install succeeded")
+	return true, nil
+}
+
+func gotest(buildpath string) (bool, error) {
+	cmd := exec.Command("go", "test", "-v", buildpath)
+
+	buf := bytes.NewBuffer([]byte{})
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+
+	if err := cmd.Run(); err != nil {
+		log("tests failed")
+		fmt.Println(buf.String())
+		return false, err
+	}
+
+	log("tests passed")
+	return true, nil
+}
+
+func run(ch chan bool, bin string, args []string) {
 	go func() {
-		cmdline := append([]string{binName}, args...)
 		var proc *os.Process
-		for relaunch := range runch {
+
+		for relaunch := range ch {
 			if proc != nil {
-				err := proc.Signal(os.Interrupt)
-				if err != nil {
+				if err := proc.Signal(os.Interrupt); err != nil {
 					log("error on sending signal to process: '%s', will now hard-kill the process", err)
 					proc.Kill()
 				}
 				proc.Wait()
 			}
+
 			if !relaunch {
 				continue
 			}
-			cmd := exec.Command(binPath, args...)
+
+			cmd := exec.Command(bin, args...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			log(fmt.Sprintf("running %s", strings.Join(cmdline, " ")))
-			err := cmd.Start()
-			if err != nil {
-				log("error on starting process: '%s'", err)
+
+			if err := cmd.Start(); err != nil {
+				log("error: %s", err)
 			}
+
 			proc = cmd.Process
 		}
 	}()
 	return
 }
 
-func rerun(buildpath string, args []string) (err error) {
-	log("setting up %s %v", buildpath, args)
+func refresh(buildpath string, ch chan bool) {
+	if *do_tests {
+		if ok, _ := gotest(buildpath); !ok {
+			ch <- false
+			return
+		}
+	}
 
+	if *do_build {
+		if ok, _ := gobuild(buildpath); !ok {
+			ch <- false
+			return
+		}
+	}
+
+	// if ok, _ := goinstall(buildpath); !ok {
+	//   ch <- false
+	//   return
+	// }
+
+	ch <- true
+	return
+}
+
+func rerun(buildpath string, args []string) (err error) {
 	pkg, err := build.Import(buildpath, "", 0)
 	if err != nil {
 		return
@@ -190,36 +176,13 @@ func rerun(buildpath string, args []string) (err error) {
 		return
 	}
 
-	_, binName := path.Split(buildpath)
-	var binPath string
-	if gobin := os.Getenv("GOBIN"); gobin != "" {
-		binPath = filepath.Join(gobin, binName)
-	} else {
-		binPath = filepath.Join(pkg.BinDir, binName)
-	}
+	_, name := path.Split(buildpath)
+	bin := filepath.Join(pkg.BinDir, name)
 
-	var runch chan bool
-	if !(*never_run) {
-		runch = run(binName, binPath, args)
-	}
+	ch := make(chan bool)
+	go run(ch, bin, args)
 
-	no_run := false
-	if *do_tests {
-		passed, _ := test(buildpath)
-		if !passed {
-			no_run = true
-		}
-	}
-
-	if *do_build && !no_run {
-		gobuild(buildpath)
-	}
-
-	var errorOutput string
-	_, errorOutput, ierr := install(buildpath, errorOutput)
-	if !no_run && !(*never_run) && ierr == nil {
-		runch <- true
-	}
+	refresh(buildpath, ch)
 
 	dir, err := buildpathDir(buildpath)
 	if err != nil {
@@ -227,25 +190,7 @@ func rerun(buildpath string, args []string) (err error) {
 	}
 
 	scanChanges(dir, func(path string) {
-		if *do_tests {
-			passed, _ := test(buildpath)
-
-			if !passed {
-				return
-			}
-		}
-
-		if *do_build {
-			gobuild(buildpath)
-		}
-
-		var errorOutput string
-		_, errorOutput, ierr := install(buildpath, errorOutput)
-
-		// rerun. if we're only testing, sending
-		if !(*never_run) && ierr == nil {
-			runch <- true
-		}
+		refresh(buildpath, ch)
 	})
 
 	return
@@ -261,8 +206,8 @@ func main() {
 
 	buildpath := flag.Args()[0]
 	args := flag.Args()[1:]
-	err := rerun(buildpath, args)
-	if err != nil {
+
+	if err := rerun(buildpath, args); err != nil {
 		log("error: %s", err)
 	}
 }
