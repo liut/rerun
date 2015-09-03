@@ -189,6 +189,7 @@ func rerun(buildpath string, args []string) (err error) {
 	}
 
 	scanChanges(dir, func(path string) {
+		log("change detected")
 		refresh(buildpath, ch)
 	})
 
