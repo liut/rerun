@@ -21,6 +21,7 @@ import (
 var (
 	do_tests = flag.Bool("test", false, "Run tests (before running program)")
 	do_build = flag.Bool("build", false, "Build program")
+	ignore   = flag.Bool("no-git", true, "ignore .git directory")
 )
 
 func buildpathDir(buildpath string) (string, error) {
@@ -44,6 +45,10 @@ func scanChanges(path string, cb scanCallback) {
 
 	for {
 		filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+			if *ignore && info.IsDir() && p == filepath.Join(path, ".git") {
+				return filepath.SkipDir
+			}
+
 			if info.ModTime().After(last) {
 				cb(path)
 				last = time.Now()
@@ -200,8 +205,12 @@ func main() {
 	flag.Parse()
 
 	if len(flag.Args()) < 1 {
-		fmt.Println("Usage: rerun [--test] [--no-run] [--build] [--race] <import path> [arg]*")
+		fmt.Println("Usage: rerun [--no-git] [--test] [--no-run] [--build] [--race] <import path> [arg]*")
 		os.Exit(1)
+	}
+
+	if *ignore {
+		log("ignoring .git dir")
 	}
 
 	buildpath := flag.Args()[0]
