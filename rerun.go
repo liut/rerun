@@ -21,7 +21,7 @@ import (
 var (
 	do_tests = flag.Bool("test", false, "Run tests (before running program)")
 	do_build = flag.Bool("build", false, "Build program")
-	ignore   = flag.Bool("nogit", true, "ignore .git directory")
+	ignore   = flag.Bool("no-git", true, "ignore .git directory")
 )
 
 func buildpathDir(buildpath string) (string, error) {
@@ -205,7 +205,7 @@ func main() {
 	flag.Parse()
 
 	if len(flag.Args()) < 1 {
-		fmt.Println("Usage: rerun [--ignore] [--test] [--no-run] [--build] [--race] <import path> [arg]*")
+		fmt.Println("Usage: rerun [--no-git] [--test] [--no-run] [--build] [--race] <import path> [arg]*")
 		os.Exit(1)
 	}
 
