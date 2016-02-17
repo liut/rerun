@@ -22,6 +22,7 @@ var (
 	do_tests = flag.Bool("test", false, "Run tests (before running program)")
 	do_build = flag.Bool("build", false, "Build program")
 	ignore   = flag.Bool("no-git", true, "ignore .git directory")
+	root     = flag.String("watch", "", "root directory to watch")
 )
 
 func buildpathDir(buildpath string) (string, error) {
@@ -191,6 +192,11 @@ func rerun(buildpath string, args []string) (err error) {
 	dir, err := buildpathDir(buildpath)
 	if err != nil {
 		return
+	}
+
+	// watch alternate dir
+	if root != nil && *root != "" {
+		dir = *root
 	}
 
 	scanChanges(dir, func(path string) {
