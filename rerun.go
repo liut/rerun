@@ -42,6 +42,8 @@ func buildpathDir(buildpath string) (string, error) {
 type scanCallback func(path string)
 
 func scanChanges(path string, cb scanCallback) {
+	log("watching: %s", path)
+
 	last := time.Now()
 
 	for {
