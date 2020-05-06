@@ -24,6 +24,7 @@ var (
 	ignore   = flag.String("ignore", "", "ignore by special pattern")
 	no_git   = flag.Bool("no-git", true, "ignore .git directory")
 	watch    = flag.String("watch", "", "root directory to watch")
+	goexec   = flag.String("goexec", "", "bin directory of go")
 )
 
 func buildpathDir(buildpath string) (string, error) {
@@ -75,7 +76,7 @@ func log(format string, args ...interface{}) {
 }
 
 func gobuild(buildpath string) (bool, error) {
-	cmd := exec.Command("go", "build", "-v", buildpath)
+	cmd := exec.Command(*goexec+"go", "build", "-v", buildpath)
 
 	buf := bytes.NewBuffer([]byte{})
 	cmd.Stdout = buf
@@ -92,7 +93,7 @@ func gobuild(buildpath string) (bool, error) {
 }
 
 func goinstall(buildpath string) (bool, error) {
-	cmd := exec.Command("go", "get", buildpath)
+	cmd := exec.Command(*goexec+"go", "get", buildpath)
 
 	buf := bytes.NewBuffer([]byte{})
 	cmd.Stdout = buf
@@ -109,7 +110,7 @@ func goinstall(buildpath string) (bool, error) {
 }
 
 func gotest(buildpath string) (bool, error) {
-	cmd := exec.Command("go", "test", "-v", buildpath)
+	cmd := exec.Command(*goexec+"go", "test", "-v", buildpath)
 
 	buf := bytes.NewBuffer([]byte{})
 	cmd.Stdout = buf
@@ -230,6 +231,15 @@ func main() {
 
 	if *no_git {
 		log("ignoring .git dir")
+	}
+
+	if *goexec != "" {
+		if _, err := os.Stat(*goexec + "/go"); os.IsNotExist(err) {
+			fmt.Println("invalid path " + *goexec)
+			os.Exit(1)
+		}
+		log("use goexec %s", *goexec)
+		*goexec += "/"
 	}
 
 	buildpath := flag.Args()[0]
