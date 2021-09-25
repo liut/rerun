@@ -171,10 +171,10 @@ func refresh(buildpath string, ch chan bool) {
 		}
 	}
 
-	if ok, _ := goinstall(buildpath); !ok {
-		ch <- false
-		return
-	}
+	// if ok, _ := goinstall(buildpath); !ok {
+	// 	ch <- false
+	// 	return
+	// }
 
 	ch <- true
 	return
@@ -192,7 +192,7 @@ func rerun(buildpath string, args []string) (err error) {
 	}
 
 	_, name := path.Split(buildpath)
-	bin := filepath.Join(pkg.BinDir, name)
+	bin := filepath.Join(pkg.Dir, name)
 
 	ch := make(chan bool)
 	go run(ch, bin, args)
