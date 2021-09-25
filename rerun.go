@@ -25,6 +25,7 @@ var (
 	no_git   = flag.Bool("no-git", true, "ignore .git directory")
 	watch    = flag.String("watch", "", "root directory to watch")
 	goexec   = flag.String("goexec", "", "bin directory of go")
+	rundir   = flag.String("rundir", ".", "bin direcotry for run")
 )
 
 func buildpathDir(buildpath string) (string, error) {
@@ -76,7 +77,16 @@ func log(format string, args ...interface{}) {
 }
 
 func gobuild(buildpath string) (bool, error) {
-	cmd := exec.Command(*goexec+"go", "build", "-v", buildpath)
+	args := []string{"build"}
+	if len(*rundir) > 1 {
+		args = append(args, "-o", *rundir+"/")
+	}
+	args = append(args, "-v", buildpath)
+	name := "go"
+	if len(*goexec) > 2 {
+		name = path.Join(*goexec, "go")
+	}
+	cmd := exec.Command(name, args...)
 
 	buf := bytes.NewBuffer([]byte{})
 	cmd.Stdout = buf
@@ -142,6 +152,7 @@ func run(ch chan bool, bin string, args []string) {
 				continue
 			}
 
+			log("start run %s", bin)
 			cmd := exec.Command(bin, args...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -192,7 +203,10 @@ func rerun(buildpath string, args []string) (err error) {
 	}
 
 	_, name := path.Split(buildpath)
-	bin := filepath.Join(pkg.Dir, name)
+	bin := filepath.Join(*rundir, name)
+	if bin == name { // current direcotry
+		bin = "./" + bin
+	}
 
 	ch := make(chan bool)
 	go run(ch, bin, args)
