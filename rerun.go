@@ -5,14 +5,15 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go/build"
@@ -73,7 +74,7 @@ func scanChanges(dir string, cb scanCallback) {
 }
 
 func log(format string, args ...interface{}) {
-	fmt.Printf("[rerun] %s", fmt.Sprintf(format+"\n", args...))
+	fmt.Fprintf(os.Stderr, "[rerun] %s", fmt.Sprintf(format+"\n", args...))
 }
 
 func gobuild(buildpath string) (bool, error) {
@@ -93,8 +94,7 @@ func gobuild(buildpath string) (bool, error) {
 	cmd.Stderr = buf
 
 	if err := cmd.Run(); err != nil {
-		log("build failed")
-		fmt.Println(buf.String())
+		log("build failed: %s", buf.String())
 		return false, err
 	}
 
@@ -192,31 +192,42 @@ func refresh(buildpath string, ch chan bool) {
 }
 
 func rerun(buildpath string, args []string) (err error) {
-	pkg, err := build.Import(buildpath, "", 0)
-	if err != nil {
-		return
-	}
+	var bin string
+	ch := make(chan bool)
 
-	if pkg.Name != "main" {
-		err = errors.New(fmt.Sprintf("expected package %q, got %q", "main", pkg.Name))
-		return
-	}
+	// pkg, err := build.Import(buildpath, "", 0)
+	// if err != nil {
+	// 	return err
+	// }
 
+	// if pkg.Name != "main" {
+	// 	err = errors.New(fmt.Sprintf("expected package %q, got %q", "main", pkg.Name))
+	// 	return err
+	// }
 	_, name := path.Split(buildpath)
-	bin := filepath.Join(*rundir, name)
+	if len(name) == 0 || name == "." {
+		if module, err := getModule(buildpath); err == nil {
+			_, name = path.Split(module)
+		}
+	}
+	if len(name) == 0 {
+		name = "app"
+	}
+
+	bin = filepath.Join(*rundir, name)
 	if bin == name { // current direcotry
 		bin = "./" + bin
 	}
 
-	ch := make(chan bool)
 	go run(ch, bin, args)
 
 	refresh(buildpath, ch)
 
-	dir, err := buildpathDir(buildpath)
-	if err != nil {
-		return
-	}
+	// dir, err := buildpathDir(buildpath)
+	// if err != nil {
+	// 	return
+	// }
+	dir := buildpath
 
 	// watch alternate dir
 	if watch != nil && *watch != "" {
@@ -262,4 +273,19 @@ func main() {
 	if err := rerun(buildpath, args); err != nil {
 		log("error: %s", err)
 	}
+}
+
+func getModule(dir string) (module string, err error) {
+	f, err := os.Open(path.Join(dir, "go.mod"))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Scan()
+	if a, b, ok := strings.Cut(scanner.Text(), " "); ok && a == "module" {
+		module = b
+	}
+	err = scanner.Err()
+	return
 }
