@@ -3,7 +3,7 @@ Use like ```rerun github.com/skelterjohn/go.uik/uiktest```
 ### Usage:
 
 ```bash
-rerun [--test] [--build] [--ignore 'tmp*'] [--rundir .] <import path> [arg]*
+rerun [--test] [--build] [--ignore 'tmp*'] [--rundir .] [--trimpath] <import path> [arg]*
 ```
 
 For any go executable in a normal GOPATH workspace, rerun will watch its source,

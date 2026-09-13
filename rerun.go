@@ -15,33 +15,18 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"go/build"
 )
 
 var (
-	do_tests = flag.Bool("test", false, "Run tests (before running program)")
-	do_build = flag.Bool("build", false, "Build program")
-	ignore   = flag.String("ignore", "", "ignore by special pattern")
-	no_git   = flag.Bool("no-git", true, "ignore .git directory")
-	watch    = flag.String("watch", "", "root directory to watch")
-	goexec   = flag.String("goexec", "", "bin directory of go")
-	rundir   = flag.String("rundir", ".", "bin direcotry for run")
+	do_tests  = flag.Bool("test", false, "Run tests (before running program)")
+	do_build  = flag.Bool("build", false, "Build program")
+	ignore    = flag.String("ignore", "", "ignore by special pattern")
+	no_git    = flag.Bool("no-git", true, "ignore .git directory")
+	watch     = flag.String("watch", "", "root directory to watch")
+	goexec    = flag.String("goexec", "", "bin directory of go")
+	rundir    = flag.String("rundir", ".", "bin direcotry for run")
+	trimpath  = flag.Bool("trimpath", false, "remove all file system paths from the resulting binary")
 )
-
-func buildpathDir(buildpath string) (string, error) {
-	pkg, err := build.Import(buildpath, "", 0)
-
-	if err != nil {
-		return "", err
-	}
-
-	if pkg.Goroot {
-		return "", err
-	}
-
-	return pkg.Dir, nil
-}
 
 type scanCallback func(dir string)
 
@@ -51,7 +36,10 @@ func scanChanges(dir string, cb scanCallback) {
 	last := time.Now()
 
 	for {
-		filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		walkErr := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
 			if *no_git && info.IsDir() && p == filepath.Join(dir, ".git") {
 				return filepath.SkipDir
 			}
@@ -68,6 +56,9 @@ func scanChanges(dir string, cb scanCallback) {
 			}
 			return nil
 		})
+		if walkErr != nil {
+			log("watch error: %s", walkErr)
+		}
 
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -81,6 +72,9 @@ func gobuild(buildpath string) (bool, error) {
 	args := []string{"build"}
 	if len(*rundir) > 1 {
 		args = append(args, "-o", *rundir+"/")
+	}
+	if *trimpath {
+		args = append(args, "-trimpath")
 	}
 	args = append(args, "-v", buildpath)
 	name := "go"
@@ -102,25 +96,13 @@ func gobuild(buildpath string) (bool, error) {
 	return true, nil
 }
 
-func goinstall(buildpath string) (bool, error) {
-	cmd := exec.Command(*goexec+"go", "get", buildpath)
-
-	buf := bytes.NewBuffer([]byte{})
-	cmd.Stdout = buf
-	cmd.Stderr = buf
-
-	if err := cmd.Run(); err != nil {
-		log("install failed")
-		fmt.Println(buf.String())
-		return false, err
-	}
-
-	log("install succeeded")
-	return true, nil
-}
-
 func gotest(buildpath string) (bool, error) {
-	cmd := exec.Command(*goexec+"go", "test", "-v", buildpath)
+	args := []string{"test", "-v"}
+	if *trimpath {
+		args = append(args, "-trimpath")
+	}
+	args = append(args, buildpath)
+	cmd := exec.Command(*goexec+"go", args...)
 
 	buf := bytes.NewBuffer([]byte{})
 	cmd.Stdout = buf
@@ -143,9 +125,13 @@ func run(ch chan bool, bin string, args []string) {
 		for relaunch := range ch {
 			if proc != nil {
 				if err := proc.Signal(os.Interrupt); err != nil {
-					proc.Kill()
+					if kerr := proc.Kill(); kerr != nil {
+						log("kill error: %s", kerr)
+					}
 				}
-				proc.Wait()
+				if _, werr := proc.Wait(); werr != nil {
+					log("wait error: %s", werr)
+				}
 			}
 
 			if !relaunch {
@@ -164,7 +150,6 @@ func run(ch chan bool, bin string, args []string) {
 			proc = cmd.Process
 		}
 	}()
-	return
 }
 
 func refresh(buildpath string, ch chan bool) {
@@ -182,13 +167,12 @@ func refresh(buildpath string, ch chan bool) {
 		}
 	}
 
-	// if ok, _ := goinstall(buildpath); !ok {
+	// if ok, _ := install(buildpath); !ok {
 	// 	ch <- false
 	// 	return
 	// }
 
 	ch <- true
-	return
 }
 
 func rerun(buildpath string, args []string) (err error) {
@@ -246,7 +230,7 @@ func main() {
 	flag.Parse()
 
 	if len(flag.Args()) < 1 {
-		fmt.Println("Usage: rerun [--no-git] [--test] [--no-run] [--build] [--race] <import path> [arg]*")
+		fmt.Println("Usage: rerun [--no-git] [--test] [--no-run] [--build] [--trimpath] [--race] <import path> [arg]*")
 		os.Exit(1)
 	}
 
@@ -280,7 +264,11 @@ func getModule(dir string) (module string, err error) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	scanner := bufio.NewScanner(f)
 	scanner.Scan()
 	if a, b, ok := strings.Cut(scanner.Text(), " "); ok && a == "module" {
